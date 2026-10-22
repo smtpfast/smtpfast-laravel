@@ -57,8 +57,16 @@ final class TransportTest extends TestCase
 
     public function testSendsAreIdempotentAcrossRetries(): void
     {
-        Mail::raw('Hello', fn (Message $m) => $m->to('ann@inbox.dev')->subject('Hi'));
-        $this->assertMatchesRegularExpression('/^[0-9a-f-]{36}$/', $this->api->calls[0]['headers']['Idempotency-Key'] ?? '');
+        $api = new FakeTransport([new Response(503, ['Retry-After' => '0'], '{"error":"busy"}')]);
+        $this->app->instance(\SMTPfast\Client::class, new \SMTPfast\Client('sf_test_key', maxRetries: 1, transport: $api));
+
+        $sent = Mail::raw('Hello', fn (Message $m) => $m->to('ann@inbox.dev')->subject('Hi'));
+
+        $this->assertSame('em_123', $sent?->getMessageId());
+        $this->assertCount(2, $api->calls);
+        $key = $api->calls[0]['headers']['Idempotency-Key'] ?? '';
+        $this->assertMatchesRegularExpression('/^[0-9a-f-]{36}$/', $key);
+        $this->assertSame($key, $api->calls[1]['headers']['Idempotency-Key'] ?? '');
     }
 
     public function testNotificationSendsThroughTheApi(): void
