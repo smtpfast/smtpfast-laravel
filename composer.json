@@ -1,0 +1,62 @@
+{
+    "name": "smtpfast/smtpfast-laravel",
+    "description": "Send Laravel mail through the SMTPfast API, with the SMTPfast PHP client and webhook verification.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["smtpfast", "laravel", "mail", "email", "transactional-email", "mail-driver"],
+    "homepage": "https://smtpfa.st",
+    "support": {
+        "docs": "https://smtpfa.st/docs",
+        "issues": "https://github.com/smtpfast/smtpfast-laravel/issues",
+        "source": "https://github.com/smtpfast/smtpfast-laravel"
+    },
+    "require": {
+        "php": "^8.2",
+        "illuminate/contracts": "^12.0 || ^13.0",
+        "illuminate/http": "^12.0 || ^13.0",
+        "illuminate/mail": "^12.0 || ^13.0",
+        "illuminate/routing": "^12.0 || ^13.0",
+        "illuminate/support": "^12.0 || ^13.0",
+        "smtpfast/smtpfast-php": "^0.1",
+        "symfony/mailer": "^7.2 || ^8.0",
+        "symfony/mime": "^7.2 || ^8.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^10.0 || ^11.0",
+        "phpunit/phpunit": "^11.5 || ^12.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "SMTPfast\\Laravel\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "SMTPfast\\Laravel\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "SMTPfast\\Laravel\\SMTPfastServiceProvider"
+            ]
+        },
+        "branch-alias": {
+            "dev-main": "0.1.x-dev"
+        }
+    },
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/smtpfast/smtpfast-php"
+        }
+    ],
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "config": {
+        "sort-packages": true
+    },
+    "scripts": {
+        "test": "phpunit"
+    }
+}
