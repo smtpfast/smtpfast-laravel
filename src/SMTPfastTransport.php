@@ -67,7 +67,8 @@ final class SMTPfastTransport extends AbstractTransport
     {
         try {
             $payload = $this->payload(MessageConverter::toEmail($message->getOriginalMessage()), $message->getEnvelope());
-        } catch (MimeException $e) {
+        } catch (MimeException|\ErrorException $e) {
+            // ErrorException: Laravel turns PHP warnings into exceptions, such as reading an attachment that is gone.
             throw new TransportException('Could not prepare the message for the SMTPfast API: ' . $e->getMessage(), 0, $e);
         }
         try {
