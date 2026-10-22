@@ -16,6 +16,7 @@ use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Symfony\Component\Mime\Address as SymfonyAddress;
 use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\Part\DataPart;
+use Symfony\Component\Mime\Part\File;
 
 final class TransportTest extends TestCase
 {
@@ -114,6 +115,97 @@ final class TransportTest extends TestCase
         $this->assertSame(['"Ann" <ann@inbox.dev>'], $payload['to']);
         $this->assertSame(['cc@inbox.dev'], $payload['cc']);
         $this->assertSame(['secret@inbox.dev'], $payload['bcc']);
+    }
+
+    public function testHeaderAddressesOutsideTheEnvelopeAreLeftOut(): void
+    {
+        $payload = $this->sendWithEnvelope(self::email(), ['ann@inbox.dev', 'test@inbox.dev']);
+
+        $this->assertSame(['"Ann" <ann@inbox.dev>'], $payload['to']);
+        $this->assertArrayNotHasKey('cc', $payload);
+        $this->assertSame(['test@inbox.dev'], $payload['bcc']);
+    }
+
+    public function testNoToRecipientIsRefusedBeforeTheApi(): void
+    {
+        try {
+            $this->sendWithEnvelope(self::email(), ['test@inbox.dev']);
+            $this->fail('no exception');
+        } catch (TransportExceptionInterface $e) {
+            $this->assertStringContainsString('at least one To recipient', $e->getMessage());
+        }
+        try {
+            Mail::raw('Hello', fn (Message $m) => $m->bcc('secret@inbox.dev')->subject('Hi'));
+            $this->fail('no exception');
+        } catch (TransportExceptionInterface) {
+        }
+        $this->assertCount(0, $this->api->calls);
+    }
+
+    public function testEachAddressIsSentOnce(): void
+    {
+        Mail::raw('Hello', fn (Message $m) => $m->to('ann@inbox.dev')->cc(['ANN@inbox.dev', 'cc@inbox.dev'])->bcc(['ann@INBOX.dev', 'cc@inbox.dev', 'secret@inbox.dev'])->subject('Hi'));
+
+        $payload = $this->api->payload();
+        $this->assertSame(['ann@inbox.dev'], $payload['to']);
+        $this->assertSame(['cc@inbox.dev'], $payload['cc']);
+        $this->assertSame(['secret@inbox.dev'], $payload['bcc']);
+    }
+
+    public function testHeaderValuesAreSentRaw(): void
+    {
+        $note = trim(str_repeat('Grüße aus Köln, ', 20));
+        Mail::raw('Hello', function (Message $m) use ($note): void {
+            $m->to('ann@inbox.dev')->subject('Hi');
+            $m->getHeaders()->addTextHeader('X-Note', $note);
+            $m->getHeaders()->addIdHeader('X-Thread-Ref', ['a1@yourapp.dev', 'b2@yourapp.dev', 'c3@yourapp.dev', 'd4@yourapp.dev', 'e5@yourapp.dev']);
+        });
+
+        $headers = $this->api->payload()['headers'];
+        $this->assertSame($note, $headers['X-Note']);
+        $this->assertSame('<a1@yourapp.dev> <b2@yourapp.dev> <c3@yourapp.dev> <d4@yourapp.dev> <e5@yourapp.dev>', $headers['X-Thread-Ref']);
+    }
+
+    public function testContentIdTheApiRefusesIsReplaced(): void
+    {
+        Mail::html('<img src="cid:logo+dark@yourapp.dev"><div style="background: url(cid:logo+dark@yourapp.dev)"></div>', function (Message $m): void {
+            $m->to('ann@inbox.dev')->subject('Logo');
+            $m->getSymfonyMessage()->addPart((new DataPart('PNG', 'logo.png', 'image/png'))->asInline()->setContentId('logo+dark@yourapp.dev'));
+        });
+
+        $payload = $this->api->payload();
+        $cid = $payload['attachments'][0]['content_id'];
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{32}@smtpfast$/', $cid);
+        $this->assertSame('<img src="cid:' . $cid . '"><div style="background: url(cid:' . $cid . ')"></div>', $payload['html']);
+    }
+
+    public function testMessageThatSymfonyAlreadyRendered(): void
+    {
+        Mail::html('<img src="cid:logo.png">', function (Message $m): void {
+            $m->to('ann@inbox.dev')->subject('Logo');
+            $part = (new DataPart('PNG', 'logo.png', 'image/png'))->asInline();
+            $m->getSymfonyMessage()->addPart($part);
+            // What Symfony 7.2 does to the part when it builds the MIME message.
+            $part->setName($part->getContentId());
+        });
+
+        $payload = $this->api->payload();
+        $this->assertSame('logo.png', $payload['attachments'][0]['filename']);
+        $this->assertSame('<img src="cid:' . $payload['attachments'][0]['content_id'] . '">', $payload['html']);
+    }
+
+    public function testUnreadableAttachmentIsATransportException(): void
+    {
+        try {
+            Mail::raw('Hello', function (Message $m): void {
+                $m->to('ann@inbox.dev')->subject('Hi');
+                $m->getSymfonyMessage()->addPart(new DataPart(new File('/no/such/file.pdf'), 'file.pdf', 'application/pdf'));
+            });
+            $this->fail('no exception');
+        } catch (TransportExceptionInterface $e) {
+            $this->assertStringContainsString('Could not prepare the message', $e->getMessage());
+            $this->assertCount(0, $this->api->calls);
+        }
     }
 
     public function testSendsAreIdempotentAcrossRetries(): void

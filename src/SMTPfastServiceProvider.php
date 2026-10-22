@@ -17,7 +17,8 @@ final class SMTPfastServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__ . '/../config/smtpfast.php', 'smtpfast');
+        // Recursive, so a config file that sets only webhook.path keeps the default webhook.secret.
+        $this->replaceConfigRecursivelyFrom(__DIR__ . '/../config/smtpfast.php', 'smtpfast');
 
         $this->app->singleton(Client::class, fn ($app): Client => self::client($app->make('config')));
         $this->app->alias(Client::class, 'smtpfast');

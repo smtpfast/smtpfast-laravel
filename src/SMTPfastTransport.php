@@ -15,7 +15,10 @@ use Symfony\Component\Mailer\SentMessage;
 use Symfony\Component\Mailer\Transport\AbstractTransport;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
+use Symfony\Component\Mime\Exception\ExceptionInterface as MimeException;
+use Symfony\Component\Mime\Header\UnstructuredHeader;
 use Symfony\Component\Mime\MessageConverter;
+use Symfony\Component\Mime\Part\DataPart;
 
 /**
  * Sends Symfony and Laravel mail through the SMTPfast API (POST /v1/emails).
@@ -32,6 +35,9 @@ final class SMTPfastTransport extends AbstractTransport
     /** SMTPfast's own instructions, sent as request fields instead of headers. */
     private const CATEGORY_HEADER = 'x-smtpfast-category';
     private const TRACKING_HEADERS = ['x-smtpfast-track-clicks' => 'track_clicks', 'x-smtpfast-track-opens' => 'track_opens'];
+
+    /** The Content-IDs the API accepts. */
+    private const API_CONTENT_ID = '/^[A-Za-z0-9._-]{1,80}(@[A-Za-z0-9.-]{1,120})?$/D';
 
     /** How Symfony finds the cid: references in the HTML when it builds a MIME message. */
     private const CID_PATTERNS = [
@@ -59,10 +65,13 @@ final class SMTPfastTransport extends AbstractTransport
 
     protected function doSend(SentMessage $message): void
     {
-        $email = MessageConverter::toEmail($message->getOriginalMessage());
-
         try {
-            $result = $this->client->emails->send($this->payload($email, $message->getEnvelope()));
+            $payload = $this->payload(MessageConverter::toEmail($message->getOriginalMessage()), $message->getEnvelope());
+        } catch (MimeException $e) {
+            throw new TransportException('Could not prepare the message for the SMTPfast API: ' . $e->getMessage(), 0, $e);
+        }
+        try {
+            $result = $this->client->emails->send($payload);
         } catch (SMTPfastException $e) {
             throw new TransportException('Request to the SMTPfast API failed: ' . $e->getMessage(), 0, $e);
         }
@@ -82,6 +91,9 @@ final class SMTPfastTransport extends AbstractTransport
     public function payload(Email $email, Envelope $envelope): array
     {
         [$to, $cc, $bcc] = self::recipients($email, $envelope);
+        if ($to === []) {
+            throw new TransportException('SMTPfast needs at least one To recipient, and this message has none that it is sent to.');
+        }
         $payload = [
             'from' => ($email->getFrom()[0] ?? $envelope->getSender())->toString(),
             'to' => self::addresses($to),
@@ -123,7 +135,10 @@ final class SMTPfastTransport extends AbstractTransport
             if (in_array($name, self::NOT_CUSTOM, true)) {
                 continue;
             }
-            $value = $header->getBodyAsString();
+            // The raw value: the API encodes and folds headers itself, and refuses line breaks.
+            $value = $header instanceof UnstructuredHeader
+                ? $header->getValue()
+                : (string) preg_replace('/\r\n(?=[ \t])/', '', $header->getBodyAsString());
             if ($name === self::CATEGORY_HEADER) {
                 $category = strtolower(trim($value));
                 continue;
@@ -150,27 +165,37 @@ final class SMTPfastTransport extends AbstractTransport
 
     /**
      * To, Cc and Bcc come from the message headers, so a Bcc address can
-     * never end up in the visible To or Cc. An envelope recipient that is in
-     * none of them (compared by address, ignoring case) is added to Bcc.
+     * never end up in the visible To or Cc. The envelope says who the message
+     * is delivered to: a header address that is not in it is left out, and an
+     * envelope recipient that is in no header is added to Bcc. Each address
+     * (compared ignoring case) is sent once, in the first of To, Cc and Bcc.
      *
      * @return array{list<Address>, list<Address>, list<Address>}
      */
     private static function recipients(Email $email, Envelope $envelope): array
     {
-        [$to, $cc, $bcc] = [array_values($email->getTo()), array_values($email->getCc()), array_values($email->getBcc())];
-        $known = [];
-        foreach ([...$to, ...$cc, ...$bcc] as $address) {
-            $known[strtolower($address->getAddress())] = true;
-        }
+        $delivered = [];
         foreach ($envelope->getRecipients() as $address) {
-            $key = strtolower($address->getAddress());
-            if (!isset($known[$key])) {
-                $known[$key] = true;
-                $bcc[] = $address;
+            $delivered[strtolower($address->getAddress())] ??= $address;
+        }
+        $groups = [[], [], []];
+        $placed = [];
+        foreach ([$email->getTo(), $email->getCc(), $email->getBcc()] as $i => $addresses) {
+            foreach ($addresses as $address) {
+                $key = strtolower($address->getAddress());
+                if (isset($delivered[$key]) && !isset($placed[$key])) {
+                    $placed[$key] = true;
+                    $groups[$i][] = $address;
+                }
+            }
+        }
+        foreach ($delivered as $key => $address) {
+            if (!isset($placed[$key])) {
+                $groups[2][] = $address;
             }
         }
 
-        return [$to, $cc, $bcc];
+        return $groups;
     }
 
     /**
@@ -197,12 +222,14 @@ final class SMTPfastTransport extends AbstractTransport
         foreach ($email->getAttachments() as $part) {
             $inline = $part->getDisposition() === 'inline';
             foreach ($names as $name) {
-                if ($name !== $part->getName() && (!$part->hasContentId() || $name !== $part->getContentId())) {
+                // Symfony 7.2 renames a part to its Content-ID once it has built the MIME
+                // message, so the file name is checked too.
+                if ($name !== $part->getName() && $name !== $part->getFilename() && (!$part->hasContentId() || $name !== $part->getContentId())) {
                     continue;
                 }
                 if (!isset($related[$name])) {
                     $related[$name] = true;
-                    $replacements['cid:' . $name] = 'cid:' . $part->getContentId();
+                    $replacements['cid:' . $name] = 'cid:' . self::contentId($part);
                     $inline = true;
                 }
                 break;
@@ -213,7 +240,10 @@ final class SMTPfastTransport extends AbstractTransport
                 'content_type' => $part->getContentType(),
             ];
             if ($inline) {
-                $item['content_id'] = $part->getContentId();
+                $item['content_id'] = self::contentId($part);
+                if ($item['content_id'] !== $part->getContentId()) {
+                    $replacements['cid:' . $part->getContentId()] ??= 'cid:' . $item['content_id'];
+                }
             }
             $items[] = $item;
         }
@@ -223,6 +253,16 @@ final class SMTPfastTransport extends AbstractTransport
         }
 
         return [$items, $html];
+    }
+
+    /**
+     * The part's Content-ID, or one the API accepts in its place, made from it.
+     */
+    private static function contentId(DataPart $part): string
+    {
+        $id = $part->getContentId();
+
+        return preg_match(self::API_CONTENT_ID, $id) === 1 ? $id : substr(hash('sha256', $id), 0, 32) . '@smtpfast';
     }
 
     /**

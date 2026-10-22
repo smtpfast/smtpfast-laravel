@@ -53,7 +53,7 @@ The driver sends one `POST /v1/emails` request per message:
 | Attachments | `attachments`, base64 |
 | `$message->embed()` and other inline parts | `attachments` with `content_id`, matching the `cid:` in the HTML |
 | `metadata()` | `tags`, as name and value |
-| Other headers, including `tag()` as `X-Tag` | `headers` |
+| Other headers, including `tag()` as `X-Tag` | `headers`, with their raw values |
 
 The SMTPfast email id becomes the message id: `$sent->getMessageId()` on the result of `Mail::send()`, and on the `MessageSent` event. A send is retried with the same `Idempotency-Key`, so a retry never sends twice. An error from the API is a Symfony `TransportException` that holds the API's message.
 

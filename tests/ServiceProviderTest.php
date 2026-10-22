@@ -41,6 +41,16 @@ final class ServiceProviderTest extends TestCase
         $this->withoutEnv('SMTPFAST_API_KEY', fn () => $this->app->make(Client::class));
     }
 
+    public function testAPartialConfigFileKeepsTheDefaults(): void
+    {
+        config(['smtpfast' => ['webhook' => ['path' => 'hooks/smtpfast']]]);
+        (new \SMTPfast\Laravel\SMTPfastServiceProvider($this->app))->register();
+
+        $this->assertSame('hooks/smtpfast', config('smtpfast.webhook.path'));
+        $this->assertArrayHasKey('secret', config('smtpfast.webhook'));
+        $this->assertSame(2, config('smtpfast.max_retries'));
+    }
+
     public function testFacade(): void
     {
         $this->assertInstanceOf(EmailsResource::class, SMTPfast::emails());

@@ -17,10 +17,12 @@ final class WebhookController
 {
     public function __invoke(Request $request): Response
     {
-        $payload = json_decode($request->getContent(), true);
-        if (!is_array($payload)) {
+        $event = json_decode($request->getContent());
+        if (!$event instanceof \stdClass) {
             throw new HttpException(400, 'The webhook body is not a JSON object.');
         }
+        /** @var array<string, mixed> $payload */
+        $payload = json_decode($request->getContent(), true);
         Event::dispatch(new WebhookReceived($payload));
 
         return new Response('', 204);

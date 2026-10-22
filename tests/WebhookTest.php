@@ -62,7 +62,11 @@ final class WebhookTest extends TestCase
 
     public function testBodyThatIsNotAnObject(): void
     {
-        $this->deliver('/smtpfast/webhook', '"hello"', hash_hmac('sha256', '"hello"', self::SECRET))->assertStatus(400);
+        Event::fake([WebhookReceived::class]);
+        foreach (['"hello"', '[]', '[{"type":"email.sent"}]', 'not json'] as $body) {
+            $this->deliver('/smtpfast/webhook', $body, hash_hmac('sha256', $body, self::SECRET))->assertStatus(400);
+        }
+        Event::assertNotDispatched(WebhookReceived::class);
     }
 
     public function testMiddlewareOnYourOwnRoute(): void
