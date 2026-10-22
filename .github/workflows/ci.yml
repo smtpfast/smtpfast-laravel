@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -31,3 +32,29 @@ jobs:
           composer update --no-interaction --no-progress --prefer-dist --with-all-dependencies
       - run: composer show --locked | grep -E '^(smtpfast/smtpfast-php|laravel/framework|symfony/mailer|orchestra/testbench|phpunit/phpunit) '
       - run: vendor/bin/phpunit
+
+  # Sends one real email through the smtpfast mailer to the Amazon SES mailbox
+  # simulator, then reads it back with the PHP SDK. Runs only when started by
+  # hand (Actions > CI > Run workflow). Needs an API key with email:send and
+  # email:read in SMTPFAST_API_KEY, and a sender on a verified domain in
+  # SMTPFAST_TEST_FROM.
+  live:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+      - run: composer update --no-interaction --no-progress --prefer-dist
+      - run: composer show --locked | grep -E '^(smtpfast/smtpfast-php|laravel/framework) '
+      - name: Fail when the secrets are missing, instead of skipping the test
+        run: test -n "$SMTPFAST_API_KEY" && test -n "$SMTPFAST_TEST_FROM" || { echo "::error::Set the SMTPFAST_API_KEY and SMTPFAST_TEST_FROM secrets"; exit 1; }
+        env:
+          SMTPFAST_API_KEY: ${{ secrets.SMTPFAST_API_KEY }}
+          SMTPFAST_TEST_FROM: ${{ secrets.SMTPFAST_TEST_FROM }}
+      - run: vendor/bin/phpunit tests/LiveTest.php --display-skipped
+        env:
+          SMTPFAST_API_KEY: ${{ secrets.SMTPFAST_API_KEY }}
+          SMTPFAST_TEST_FROM: ${{ secrets.SMTPFAST_TEST_FROM }}

@@ -133,7 +133,11 @@ Route::post('/hooks/smtpfast', SMTPfastWebhookController::class)->middleware('sm
 ```bash
 composer install
 vendor/bin/phpunit
+# One real email to the Amazon SES mailbox simulator, read back with the PHP SDK:
+SMTPFAST_API_KEY=sf_... SMTPFAST_TEST_FROM=test@yourdomain.com vendor/bin/phpunit tests/LiveTest.php
 ```
+
+In GitHub Actions, the `live` job of the CI workflow does the same when the workflow is started by hand, with the `SMTPFAST_API_KEY` and `SMTPFAST_TEST_FROM` secrets.
 
 Until `smtpfast/smtpfast-php` is on Packagist, `composer.json` gets it from its GitHub repository (the `repositories` entry, with `minimum-stability: dev` and `prefer-stable`). Composer then uses the `0.1.x-dev` branch alias of its main branch, and the first tagged release once there is one. To work on both packages together, point Composer at a local checkout:
 
