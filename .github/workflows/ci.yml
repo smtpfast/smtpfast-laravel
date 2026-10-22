@@ -29,5 +29,5 @@ jobs:
         run: |
           composer require --no-update --no-interaction "illuminate/support:^${{ matrix.laravel }}.0"
           composer update --no-interaction --no-progress --prefer-dist --with-all-dependencies
-      - run: composer show smtpfast/smtpfast-php laravel/framework | grep -E '^(name|versions|source)'
+      - run: composer show --locked | grep -E '^(smtpfast/smtpfast-php|laravel/framework|symfony/mailer|orchestra/testbench|phpunit/phpunit) '
       - run: vendor/bin/phpunit
