@@ -81,15 +81,16 @@ final class SMTPfastTransport extends AbstractTransport
      */
     public function payload(Email $email, Envelope $envelope): array
     {
+        [$to, $cc, $bcc] = self::recipients($email, $envelope);
         $payload = [
             'from' => ($email->getFrom()[0] ?? $envelope->getSender())->toString(),
-            'to' => self::addresses($this->recipients($email, $envelope)),
+            'to' => self::addresses($to),
         ];
-        if ($email->getCc() !== []) {
-            $payload['cc'] = self::addresses($email->getCc());
+        if ($cc !== []) {
+            $payload['cc'] = self::addresses($cc);
         }
-        if ($email->getBcc() !== []) {
-            $payload['bcc'] = self::addresses($email->getBcc());
+        if ($bcc !== []) {
+            $payload['bcc'] = self::addresses($bcc);
         }
         if ($email->getReplyTo() !== []) {
             $payload['reply_to'] = self::addresses($email->getReplyTo());
@@ -148,15 +149,28 @@ final class SMTPfastTransport extends AbstractTransport
     }
 
     /**
-     * The To recipients: the envelope recipients that are not Cc or Bcc.
+     * To, Cc and Bcc come from the message headers, so a Bcc address can
+     * never end up in the visible To or Cc. An envelope recipient that is in
+     * none of them (compared by address, ignoring case) is added to Bcc.
      *
-     * @return list<Address>
+     * @return array{list<Address>, list<Address>, list<Address>}
      */
-    private function recipients(Email $email, Envelope $envelope): array
+    private static function recipients(Email $email, Envelope $envelope): array
     {
-        $copies = array_merge($email->getCc(), $email->getBcc());
+        [$to, $cc, $bcc] = [array_values($email->getTo()), array_values($email->getCc()), array_values($email->getBcc())];
+        $known = [];
+        foreach ([...$to, ...$cc, ...$bcc] as $address) {
+            $known[strtolower($address->getAddress())] = true;
+        }
+        foreach ($envelope->getRecipients() as $address) {
+            $key = strtolower($address->getAddress());
+            if (!isset($known[$key])) {
+                $known[$key] = true;
+                $bcc[] = $address;
+            }
+        }
 
-        return array_values(array_filter($envelope->getRecipients(), fn (Address $address): bool => !in_array($address, $copies, true)));
+        return [$to, $cc, $bcc];
     }
 
     /**

@@ -11,7 +11,10 @@ use SMTPfast\Http\Response;
 use SMTPfast\Laravel\SMTPfastTransport;
 use SMTPfast\Laravel\Tests\Fixtures\OrderShipped;
 use SMTPfast\Laravel\Tests\Fixtures\PasswordReset;
+use Symfony\Component\Mailer\Envelope;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
+use Symfony\Component\Mime\Address as SymfonyAddress;
+use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\Part\DataPart;
 
 final class TransportTest extends TestCase
@@ -53,6 +56,64 @@ final class TransportTest extends TestCase
         $this->assertMatchesRegularExpression('/^[0-9a-f]{32}@symfony$/', $logo['content_id']);
         $this->assertStringContainsString('<img src="cid:' . $logo['content_id'] . '"', $payload['html']);
         $this->assertStringContainsString('Order 1234 is on its way.', $payload['html']);
+    }
+
+    /**
+     * Sends through the transport with an envelope of its own, the way
+     * Symfony's Envelope::setRecipients() makes it: new Address objects, no names.
+     *
+     * @param list<string> $envelopeRecipients
+     *
+     * @return array<string, mixed>
+     */
+    private function sendWithEnvelope(Email $email, array $envelopeRecipients): array
+    {
+        $transport = new SMTPfastTransport(new \SMTPfast\Client('sf_test_key', maxRetries: 0, transport: $this->api));
+        $envelope = new Envelope(new SymfonyAddress('orders@yourapp.dev'), array_map(fn (string $a) => new SymfonyAddress($a), $envelopeRecipients));
+        $this->assertSame('em_123', $transport->send($email, $envelope)?->getMessageId());
+
+        return $this->api->payload(count($this->api->calls) - 1);
+    }
+
+    private static function email(): Email
+    {
+        return (new Email())->from('orders@yourapp.dev')->subject('Hi')->text('Hello')
+            ->to(new SymfonyAddress('ann@inbox.dev', 'Ann'))
+            ->cc('cc@inbox.dev')
+            ->bcc('secret@inbox.dev');
+    }
+
+    public function testBccNeverAppearsInToOrCc(): void
+    {
+        $payload = $this->sendWithEnvelope(self::email(), ['ann@inbox.dev', 'cc@inbox.dev', 'secret@inbox.dev']);
+
+        $this->assertSame(['"Ann" <ann@inbox.dev>'], $payload['to']);
+        $this->assertSame(['cc@inbox.dev'], $payload['cc']);
+        $this->assertSame(['secret@inbox.dev'], $payload['bcc']);
+
+        Mail::raw('Hello', fn (Message $m) => $m->to('ann@inbox.dev')->cc('cc@inbox.dev')->bcc(['secret@inbox.dev', 'secret2@inbox.dev'])->subject('Hi'));
+        $payload = $this->api->payload(1);
+        $this->assertSame(['ann@inbox.dev'], $payload['to']);
+        $this->assertSame(['cc@inbox.dev'], $payload['cc']);
+        $this->assertSame(['secret@inbox.dev', 'secret2@inbox.dev'], $payload['bcc']);
+    }
+
+    public function testEnvelopeOnlyRecipientGoesToBcc(): void
+    {
+        $payload = $this->sendWithEnvelope(self::email(), ['ann@inbox.dev', 'cc@inbox.dev', 'secret@inbox.dev', 'audit@inbox.dev']);
+
+        $this->assertSame(['"Ann" <ann@inbox.dev>'], $payload['to']);
+        $this->assertSame(['cc@inbox.dev'], $payload['cc']);
+        $this->assertSame(['secret@inbox.dev', 'audit@inbox.dev'], $payload['bcc']);
+    }
+
+    public function testRecipientComparisonIgnoresCase(): void
+    {
+        $payload = $this->sendWithEnvelope(self::email(), ['ANN@Inbox.Dev', 'Cc@inbox.dev', 'SECRET@INBOX.DEV']);
+
+        $this->assertSame(['"Ann" <ann@inbox.dev>'], $payload['to']);
+        $this->assertSame(['cc@inbox.dev'], $payload['cc']);
+        $this->assertSame(['secret@inbox.dev'], $payload['bcc']);
     }
 
     public function testSendsAreIdempotentAcrossRetries(): void
