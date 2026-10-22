@@ -139,7 +139,7 @@ SMTPFAST_API_KEY=sf_... SMTPFAST_TEST_FROM=test@yourdomain.com vendor/bin/phpuni
 
 In GitHub Actions, the `live` job of the CI workflow does the same when the workflow is started by hand, with the `SMTPFAST_API_KEY` and `SMTPFAST_TEST_FROM` secrets.
 
-Until `smtpfast/smtpfast-php` is on Packagist, `composer.json` gets it from its GitHub repository (the `repositories` entry, with `minimum-stability: dev` and `prefer-stable`). Composer then uses the `0.1.x-dev` branch alias of its main branch, and the first tagged release once there is one. To work on both packages together, point Composer at a local checkout:
+To work on this package and `smtpfast/smtpfast-php` together, point Composer at a local checkout of the SDK:
 
 ```bash
 composer config repositories.smtpfast-php path ../smtpfast-php

@@ -45,14 +45,6 @@
             "dev-main": "0.1.x-dev"
         }
     },
-    "repositories": [
-        {
-            "type": "vcs",
-            "url": "https://github.com/smtpfast/smtpfast-php"
-        }
-    ],
-    "minimum-stability": "dev",
-    "prefer-stable": true,
     "config": {
         "sort-packages": true
     },
