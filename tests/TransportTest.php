@@ -179,6 +179,19 @@ final class TransportTest extends TestCase
         $this->assertSame('<img src="cid:' . $cid . '"><div style="background: url(cid:' . $cid . ')"></div>', $payload['html']);
     }
 
+    public function testEveryReferenceToAPartIsRewritten(): void
+    {
+        Mail::html('<img src="CID:logo+dark@yourapp.dev"><img src="cid:logo.png"><img background="Cid:logo+dark@yourapp.dev">', function (Message $m): void {
+            $m->to('ann@inbox.dev')->subject('Logo');
+            $m->getSymfonyMessage()->addPart((new DataPart('PNG', 'logo.png', 'image/png'))->asInline()->setContentId('logo+dark@yourapp.dev'));
+        });
+
+        $payload = $this->api->payload();
+        $cid = $payload['attachments'][0]['content_id'];
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{32}@smtpfast$/', $cid);
+        $this->assertSame("<img src=\"cid:$cid\"><img src=\"cid:$cid\"><img background=\"cid:$cid\">", $payload['html']);
+    }
+
     public function testMessageThatSymfonyAlreadyRendered(): void
     {
         Mail::html('<img src="cid:logo.png">', function (Message $m): void {

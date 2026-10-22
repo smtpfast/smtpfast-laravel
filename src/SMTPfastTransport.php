@@ -225,15 +225,16 @@ final class SMTPfastTransport extends AbstractTransport
             foreach ($names as $name) {
                 // Symfony 7.2 renames a part to its Content-ID once it has built the MIME
                 // message, so the file name is checked too.
+                // Every name that points at this part (its name, file name or Content-ID) is
+                // rewritten; a name stays with the first part that has it.
                 if ($name !== $part->getName() && $name !== $part->getFilename() && (!$part->hasContentId() || $name !== $part->getContentId())) {
                     continue;
                 }
                 if (!isset($related[$name])) {
                     $related[$name] = true;
-                    $replacements['cid:' . $name] = 'cid:' . self::contentId($part);
+                    $replacements[$name] = self::contentId($part);
                     $inline = true;
                 }
-                break;
             }
             $item = [
                 'filename' => $part->getFilename() ?? $part->getName() ?? 'attachment',
@@ -243,14 +244,17 @@ final class SMTPfastTransport extends AbstractTransport
             if ($inline) {
                 $item['content_id'] = self::contentId($part);
                 if ($item['content_id'] !== $part->getContentId()) {
-                    $replacements['cid:' . $part->getContentId()] ??= 'cid:' . $item['content_id'];
+                    $replacements[$part->getContentId()] ??= $item['content_id'];
                 }
             }
             $items[] = $item;
         }
         if ($html !== null && $replacements !== []) {
-            // One pass, longest name first, as Symfony does.
-            $html = strtr($html, $replacements);
+            // One pass, longest name first, as Symfony's strtr() does; the cid: scheme in any letter case.
+            $names = array_map('strval', array_keys($replacements));
+            usort($names, fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+            $pattern = '/(?i:cid):(' . implode('|', array_map(fn (string $name): string => preg_quote($name, '/'), $names)) . ')/';
+            $html = (string) preg_replace_callback($pattern, fn (array $m): string => 'cid:' . $replacements[$m[1]], $html);
         }
 
         return [$items, $html];
