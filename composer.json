@@ -17,7 +17,7 @@
         "illuminate/mail": "^12.0 || ^13.0",
         "illuminate/routing": "^12.0 || ^13.0",
         "illuminate/support": "^12.0 || ^13.0",
-        "smtpfast/smtpfast-php": "^0.1",
+        "smtpfast/smtpfast-php": "^0.1 || ^0.2",
         "symfony/mailer": "^7.2 || ^8.0",
         "symfony/mime": "^7.2 || ^8.0"
     },
